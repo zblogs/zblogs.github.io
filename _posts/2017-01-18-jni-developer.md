@@ -60,6 +60,7 @@ class JNIDemo {
 ```
 
 C程序代码：
+
 ```cpp
 typedef struct demo_native_t {
     int id_;
