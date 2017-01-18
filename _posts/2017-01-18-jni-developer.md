@@ -19,7 +19,6 @@ JNI开发过程中的关键问题分析和解决方法。
 
 + **内存**
 + **线程**
-+ **对象及引用**
 
 ## 内存
 
@@ -30,7 +29,7 @@ JNI开发过程中的关键问题分析和解决方法。
 
 两者的区别：
 
-```C
+```cpp
 
 jobject obj = env->NewObject(...); // 建一个Java类对象，在JVM堆上申请内存。
 
@@ -53,9 +52,19 @@ class JNIDemo {
     public int getId() {
         return getId0(nativePtr); // 传入native指针
     }
+
+    public void Dispose() {
+        if (nativePtr > 0L) {
+            dispose0(nativePtr);
+            nativePtr = 0L;
+        }
+    }
+
     private native long construct0();
 
     private native int getId0(long ptr); 
+
+    private native void dispose0(long ptr);
 }
 ```
 
@@ -68,17 +77,74 @@ typedef struct demo_native_t {
 } demo_native_t;
 
 jlong JNIDemo_construct0(jenv *env, jobject obj) {
-    demo_native_t *demo = (demo_native_t *)malloc(sizeof(demo_native_t)); // 这个函数最好在
+    // 这申请了一片native内存。需要找一个合适的时机释放掉。
+    demo_native_t *demo = (demo_native_t *)malloc(sizeof(demo_native_t)); 
     demo.id_ = 1;
     damo.data_ = NULL;
-    return (jlong)demo;  /* 返回native指针 */
+    /* 返回native指针 */
+    return (jlong)demo;
 }
 
 jint JNIDemo_getId0(jenv *env, jobject obj, jlong ptr) {
-    demo_native_t *demo = (demo_native_t *)ptr; /* 强制转换 *／
+    /* 强制转换，就能用咯 */
+    demo_native_t *demo = (demo_native_t *)ptr;
     return demo.id_;
+}
+
+void JNIDemo_dispose0(jenv *env, jobject obj, jlong ptr) {
+    demo_native_t *demo = (demo_native_t *)ptr;
+    free(demo);
 }
 
 ```
 
+### Native结构体又如何关联一个Java对象呢？
+
+这就需要使用“引用”。相关函数列表：
+
+#### [Global and Local References](http://docs.oracle.com/javase/6/docs/technotes/guides/jni/spec/functions.html#global_local)
+
++ NewGlobalRef
++ DeleteGlobalRef
++ DeleteLocalRef
++ EnsureLocalCapacity
++ PushLocalFrame
++ PopLocalFrame
++ NewLocalRef
+
+#### [Weak Global References](http://docs.oracle.com/javase/6/docs/technotes/guides/jni/spec/functions.html#weak)
+
++ NewWeakGlobalRef
++ DeleteWeakGlobalRef
+
+弱引用主要是为了防止native代码引用了Java对象从而阻止垃圾回收，造成内存泄漏。与c++的weak_ptr的目标是一致的。那么什么时候用GlobalRef，什么时候用LocalRef呢？官方对Local References的解释如下：
+
+```
+Local References
+Local references are valid for the duration of a native method call. They are freed automatically after the native method returns. Each local reference costs some amount of Java Virtual Machine resource. Programmers need to make sure that native methods do not excessively allocate local references. Although local references are automatically freed after the native method returns to Java, excessive allocation of local references may cause the VM to run out of memory during the execution of a native method.
+```
+
+我认为：线程是由C／C++代码发起时，需要手动调用DeleteLocalRef释放Local References。而线程又Java代码发起，调用native方法时，不需要管理Local References。因为方法返回时会自动释放。
+
+那么native代码需要引用一个Java对象，最好使用Global References或者Weak Global References。
+
 ## 线程
+
+和内存一样也分两类：
+
++ Java线程
++ Native线程
+
+著名的jenv是Java线程独立的，JVM会为每一个Java线程创建一个jenv对象。
+
+由C/C++代码发起的线程称为Native线程。反之则为Java线程。
+当Java代码调用native方法时，使用的线程既是Java线程。这种场景下，不需要特殊的处理。
+当C/C++代码发生回调时需要调用Java方法时，这时使用的线程为Native线程。这种场景下，需要在调用Java方法之前必须将Native线程关联成Java线程，并且在调用结束后解除关联。相关函数列表：
+
++ AttachCurrentThread
++ AttachCurrentThreadAsDaemon
++ DetachCurrentThread
+
+## 参考文献
+
+[Java Native Interface Specification](http://docs.oracle.com/javase/6/docs/technotes/guides/jni/spec/jniTOC.html)
