@@ -1,12 +1,12 @@
 ---
 layout: post
-title:  "JNI开发收集"
+title:  "JNI开发手记"
 date:   2016-01-18 21:10:35 +0800
 categories: Java
 tags: [JNI, C/C++]
 ---
 
-JNI开发手记
+JNI开发过程中的关键问题分析和解决方法。
 
 ## 前言
 
