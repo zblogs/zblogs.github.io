@@ -166,7 +166,7 @@ jlong JNIDemo_construct0(jenv *env, jobject obj) {
     demo_native_t *demo = (demo_native_t *)malloc(sizeof(demo_native_t)); 
     demo.id_ = 1;
     demo.data_ = NULL;
-    ／* 引用 *／
+    /* 引用 */
     demo.obj_ = env->NewGlobalRef(obj);
     /* 返回native指针 */
     return (jlong)demo;
@@ -228,7 +228,7 @@ jlong JNIDemo_construct0(jenv *env, jobject obj) {
     demo_native_t *demo = (demo_native_t *)malloc(sizeof(demo_native_t)); 
     demo.id_ = 1;
     demo.data_ = NULL;
-    ／* 弱引用，比阻止垃圾回收 *／
+    /* 弱引用，比阻止垃圾回收 */
     demo.obj_ = env->NewWeakGlobalRef(obj);
     /* 返回native指针 */
     return (jlong)demo;
