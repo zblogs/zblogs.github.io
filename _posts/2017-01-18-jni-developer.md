@@ -39,7 +39,7 @@ int *pArray = (int *)malloc(sizeof(int) * 10); // Native堆上申请内存
 
 对于JVM堆上申请的内存，我们不需要通过代码释放内存。但是，Java是通过引用计数来回收垃圾内存的，在一些场景下仍然有需要一些额外的代码来让垃圾回收器正确回收。文章后面会介绍。
 
-### Java对象如何与Natvie内存关联呢？
+### Java对象引用Native指针
 
 Java程序可以通过一个long类型的属性，保存Native内存的指针。
 
@@ -98,7 +98,7 @@ void JNIDemo_dispose0(jenv *env, jobject obj, jlong ptr) {
 
 ```
 
-### Native结构体又如何关联一个Java对象呢？
+### Native代码引用Java对象
 
 这就需要使用“引用”。相关函数列表：
 
@@ -122,9 +122,128 @@ void JNIDemo_dispose0(jenv *env, jobject obj, jlong ptr) {
 > Local references are valid for the duration of a native method call. They are freed automatically after the native method returns. Each local reference costs some amount of Java Virtual Machine resource. Programmers need to make sure that native methods do not excessively allocate local references. Although local references are automatically freed after the native method returns to Java, excessive allocation of local references may cause the VM to run out of memory during the execution of a native method.
 
 
-我认为：线程是由C／C++代码发起时，需要手动调用DeleteLocalRef释放Local References。而线程又Java代码发起，调用native方法时，不需要管理Local References。因为方法返回时会自动释放。
+我认为：线程是由C／C++代码发起时，需要手动调用DeleteLocalRef释放Local References。而线程由Java代码发起调用native方法时，不需要管理Local References。因为native方法返回时JVM会自动释放。
 
 那么native代码需要引用一个Java对象，最好使用Global References或者Weak Global References。
+
+Java代码：
+
+```java
+class JNIDemo {
+    private long nativePtr;
+    public JNIDemo() {
+        nativePtr = construct0(); // 保存native指针
+    }
+    public int getId() {
+        return getId0(nativePtr); // 传入native指针
+    }
+
+    public void Dispose() {
+        if (nativePtr > 0L) {
+            dispose0(nativePtr);
+            nativePtr = 0L;
+        }
+    }
+
+    private native long construct0();
+
+    private native int getId0(long ptr); 
+
+    private native void dispose0(long ptr);
+}
+```
+
+C程序代码：
+
+```cpp
+typedef struct demo_native_t {
+    int id_;
+    char *data_;
+    jobject obj_;
+} demo_native_t;
+
+jlong JNIDemo_construct0(jenv *env, jobject obj) {
+    demo_native_t *demo = (demo_native_t *)malloc(sizeof(demo_native_t)); 
+    demo.id_ = 1;
+    demo.data_ = NULL;
+    ／* 引用 *／
+    demo.obj_ = env->NewGlobalRef(obj);
+    /* 返回native指针 */
+    return (jlong)demo;
+}
+
+void JNIDemo_dispose0(jenv *env, jobject obj, jlong ptr) {
+    demo_native_t *demo = (demo_native_t *)ptr;
+    /* 释放引用 */
+    env->DeletelobalRef(demo->obj_);
+    free(demo);
+}
+
+```
+
+上面Java代码需要用户通过调用Dispose方法清理Native资源。当想自动释放该如何处理呢？
+
+Java代码：
+
+```java
+class JNIDemo {
+    private long nativePtr;
+    public JNIDemo() {
+        nativePtr = construct0(); // 保存native指针
+    }
+    public int getId() {
+        return getId0(nativePtr); // 传入native指针
+    }
+
+    public void Dispose() {
+        if (nativePtr > 0L) {
+            dispose0(nativePtr);
+            nativePtr = 0L;
+        }
+    }
+
+    protected void finalize() {
+        super.finalize();
+        Dispose();
+    }
+
+    private native long construct0();
+
+    private native int getId0(long ptr); 
+
+    private native void dispose0(long ptr);
+}
+```
+
+C程序代码：
+
+```cpp
+typedef struct demo_native_t {
+    int id_;
+    char *data_;
+    jobject obj_;
+} demo_native_t;
+
+jlong JNIDemo_construct0(jenv *env, jobject obj) {
+    demo_native_t *demo = (demo_native_t *)malloc(sizeof(demo_native_t)); 
+    demo.id_ = 1;
+    demo.data_ = NULL;
+    ／* 弱引用，比阻止垃圾回收 *／
+    demo.obj_ = env->NewWeakGlobalRef(obj);
+    /* 返回native指针 */
+    return (jlong)demo;
+}
+
+void JNIDemo_dispose0(jenv *env, jobject obj, jlong ptr) {
+    demo_native_t *demo = (demo_native_t *)ptr;
+    /* 释放引用 */
+    env->DeleteWeakGlobalRef(demo->obj_);
+    free(demo);
+}
+
+```
+
+弱引用就是这么试用滴！
 
 ## 线程
 
@@ -133,7 +252,7 @@ void JNIDemo_dispose0(jenv *env, jobject obj, jlong ptr) {
 > + Java线程
 > + Native线程
 
-著名的jenv是Java线程独立的，JVM会为每一个Java线程创建一个jenv对象。
+著名的jenv实例是Java线程独立的，JVM会为每一个Java线程创建一个jenv实例。
 
 由C/C++代码发起的线程称为Native线程。反之则为Java线程。
 当Java代码调用native方法时，使用的线程既是Java线程。这种场景下，不需要特殊的处理。
