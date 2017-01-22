@@ -10,15 +10,22 @@ JNI开发过程中的关键问题分析和解决方法。
 
 ## 前言
 
-已经有不少前辈已经对这个技术有了介绍了。但我仍然想要从原理的出发来讲述使用JNI技术的关键点。
-
-### 目标
+已经有不少前辈已经对这个技术有了介绍了。但我仍然想要从原理的角度出发，讲述使用JNI技术的关键点。本文主要内容是在使用JNI技术开发过程中，翻阅官方文档的得到的理解，并辅以一点来说明问题。希望能对想了深入理解JNI技术的同学有一点帮助。
+对于想更深入理解JNI的同学，请参考:[Java Native Interface Specification](http://docs.oracle.com/javase/6/docs/technotes/guides/jni/spec/jniTOC.html)
 
 目标观众需要对线程、JVM内存管理有一定了解。
+
+本文下面的代码主要起示例作用，不保证正确性。
+
+
+## 概述
+
 本文将介绍如下内容：
 
 + **内存**
 + **线程**
++ **C/C++调用Java方法**
++ **异常处理**
 
 ## 内存
 
@@ -76,7 +83,7 @@ typedef struct demo_native_t {
     char *data_;
 } demo_native_t;
 
-jlong JNIDemo_construct0(jenv *env, jobject obj) {
+jlong Java_JNIDemo_construct0(JNIEnv *env, jobject obj) {
     // 这申请了一片native内存。需要找一个合适的时机释放掉。
     demo_native_t *demo = (demo_native_t *)malloc(sizeof(demo_native_t)); 
     demo.id_ = 1;
@@ -85,13 +92,13 @@ jlong JNIDemo_construct0(jenv *env, jobject obj) {
     return (jlong)demo;
 }
 
-jint JNIDemo_getId0(jenv *env, jobject obj, jlong ptr) {
+jint Java_JNIDemo_getId0(JNIEnv *env, jobject obj, jlong ptr) {
     /* 强制转换，就能用咯 */
     demo_native_t *demo = (demo_native_t *)ptr;
     return demo.id_;
 }
 
-void JNIDemo_dispose0(jenv *env, jobject obj, jlong ptr) {
+void Java_JNIDemo_dispose0(JNIEnv *env, jobject obj, jlong ptr) {
     demo_native_t *demo = (demo_native_t *)ptr;
     free(demo);
 }
@@ -162,7 +169,7 @@ typedef struct demo_native_t {
     jobject obj_;
 } demo_native_t;
 
-jlong JNIDemo_construct0(jenv *env, jobject obj) {
+jlong Java_JNIDemo_construct0(JNIEnv *env, jobject obj) {
     demo_native_t *demo = (demo_native_t *)malloc(sizeof(demo_native_t)); 
     demo.id_ = 1;
     demo.data_ = NULL;
@@ -172,7 +179,7 @@ jlong JNIDemo_construct0(jenv *env, jobject obj) {
     return (jlong)demo;
 }
 
-void JNIDemo_dispose0(jenv *env, jobject obj, jlong ptr) {
+void Java_JNIDemo_dispose0(JNIEnv *env, jobject obj, jlong ptr) {
     demo_native_t *demo = (demo_native_t *)ptr;
     /* 释放引用 */
     env->DeletelobalRef(demo->obj_);
@@ -224,7 +231,7 @@ typedef struct demo_native_t {
     jobject obj_;
 } demo_native_t;
 
-jlong JNIDemo_construct0(jenv *env, jobject obj) {
+jlong Java_JNIDemo_construct0(JNIEnv *env, jobject obj) {
     demo_native_t *demo = (demo_native_t *)malloc(sizeof(demo_native_t)); 
     demo.id_ = 1;
     demo.data_ = NULL;
@@ -234,7 +241,7 @@ jlong JNIDemo_construct0(jenv *env, jobject obj) {
     return (jlong)demo;
 }
 
-void JNIDemo_dispose0(jenv *env, jobject obj, jlong ptr) {
+void Java_JNIDemo_dispose0(JNIEnv *env, jobject obj, jlong ptr) {
     demo_native_t *demo = (demo_native_t *)ptr;
     /* 释放引用 */
     env->DeleteWeakGlobalRef(demo->obj_);
@@ -252,9 +259,9 @@ void JNIDemo_dispose0(jenv *env, jobject obj, jlong ptr) {
 > + Java线程
 > + Native线程
 
-著名的jenv实例是Java线程独立的，JVM会为每一个Java线程创建一个jenv实例。
+著名的JNIEnv实例是Java线程独立的，JVM会为每一个Java线程创建一个JNIEnv实例。
 
-由C/C++代码发起的线程称为Native线程。反之则为Java线程。
+由C/C++代码发起的线程称为Native线程。反之则为Java线程。（此处术语我瞎编的，能区分两者即可^_^）
 当Java代码调用native方法时，使用的线程既是Java线程。这种场景下，不需要特殊的处理。
 当C/C++代码发生回调时需要调用Java方法时，这时使用的线程为Native线程。这种场景下，需要在调用Java方法之前必须将Native线程关联成Java线程，并且在调用结束后解除关联。相关函数列表：
 
@@ -262,6 +269,104 @@ void JNIDemo_dispose0(jenv *env, jobject obj, jlong ptr) {
 > + AttachCurrentThreadAsDaemon
 > + DetachCurrentThread
 
+```cpp
+
+void demo_cb(JavaVM *jvm, ...)
+{
+    JNIEnv *env = NULL;
+    JavaVMAttachArgs attachArgs = {
+        JNI_VERSION_1_6, /* JNI版本号 */
+        "demo_cb thread", /* 线程名称 */
+        NULL   /* 线程组。这里就不设置啦 */
+        };
+    
+    int rc = AttachCurrentThread(jvm, &env, &attachArgs);
+    if (rc == JNI_OK)
+    {
+        // Call Java code.
+        ...
+
+        // 处理完后，记得detach哟
+        DetachCurrentThread(jvm);
+    }
+    else
+    {
+         // handle error.
+        ...
+    }
+}
+
+
+```
+
+## C/C++调用Java方法
+
+关键函数列表：
+
+> + FindClass
+> + GetMethodID
+> + NewObject
+> + Call<type>Method Routines, Call<type>MethodA Routines, and Call<type>MethodV Routines
+> + CallNonvirtual<type>Method Routines, CallNonvirtual<type>MethodA Routines, and CallNonvirtual<type>MethodV Routines
+
+原始类型对照表：
+
+> |Java Type|Native Type|Description|
+> |:----|:----|:----|
+> |boolean|jboolean|unsigned 8 bits|
+> |byte|jbyte|signed 8 bits|
+> |char|jchar|unsigned 16 bits|
+> |short|jshort|signed 16 bits|
+> |int|jint|signed 32 bits|
+> |long|jlong|signed 64 bits|
+> |float|jfloat|32 bits|
+> |double|jdouble|64 bits|
+> |void|void|N/A|
+
+引用类型集成关系：
+
+![](/assets/images/jni-reference-types.gif)
+
+类型签名：
+
+|Type Signature|Java Type|
+|:----|:----|
+|Z|boolean|
+|B|byte|
+|C|char|
+|S|short|
+|I|int|
+|J|long|
+|F|float|
+|D|double|
+|L fully-qualified-class ;|fully-qualified-class|
+|[ type|type[]|
+|( arg-types ) ret-type|method type|
+
+例如：下面Java方法：
+
+> long f (int n, String s, int[] arr); 
+
+类型签名如下:
+
+> (ILjava/lang/String;[I)J
+
+
+## 异常处理
+
+异常处理函数列表：
+
+> + Throw             你懂的
+> + ThrowNew          你懂的
+> + ExceptionOccurred 检测是否有异常发生；
+> + ExceptionDescribe 打印异常堆栈信息；
+> + ExceptionClear    清理所有异常
+> + FatalError        触发一个致命错误
+> + ExceptionCheck    也是检查异常（还不太了解）
+
+注意Throw和ThrowNew方法，并不会终止后面的C/C++代码。
+
 ## 参考文献
 
 + [Java Native Interface Specification](http://docs.oracle.com/javase/6/docs/technotes/guides/jni/spec/jniTOC.html)
+
