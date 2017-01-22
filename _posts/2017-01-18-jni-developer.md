@@ -323,7 +323,7 @@ void demo_cb(JavaVM *jvm, ...)
 > |double|jdouble|64 bits|
 > |void|void|N/A|
 
-引用类型集成关系：
+引用类型继承关系：
 
 ![](/assets/images/jni-reference-types.gif)
 
