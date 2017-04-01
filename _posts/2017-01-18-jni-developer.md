@@ -12,12 +12,11 @@ JNI开发过程中的关键问题分析和解决方法。
 
 已经有不少前辈已经对这个技术有了介绍了。但我仍然想要从原理的角度出发，讲述使用JNI技术的关键点。本文主要内容是在使用JNI技术开发过程中，翻阅官方文档的得到的理解，并辅以一点来说明问题。希望能对想了深入理解JNI技术的同学有一点帮助。
 
-目标观众需要对线程、JVM内存管理有一定了解。
+## 声明
 
-本文下面的代码主要起示例作用，不保证正确性。
-
-对于想更深入理解JNI的同学，请参考:[Java Native Interface Specification](http://docs.oracle.com/javase/6/docs/technotes/guides/jni/spec/jniTOC.html)
-
++ 目标观众需要对线程、JVM内存管理有一定了解。
++ 本文下面的代码主要起示例作用，不保证正确性。
++ 对于想更深入理解JNI的同学，请参考:[Java Native Interface Specification](http://docs.oracle.com/javase/6/docs/technotes/guides/jni/spec/jniTOC.html)
 
 ## 概述
 
